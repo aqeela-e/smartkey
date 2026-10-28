@@ -1,0 +1,38 @@
+{
+  "bit_length": 256,
+  "n_random": 300,
+  "n_defective": 300,
+  "confusion": {
+    "TP": 291,
+    "FN": 9,
+    "FP": 0,
+    "TN": 300
+  },
+  "metrics": {
+    "total": 600,
+    "accuracy": 0.985,
+    "precision": 1.0,
+    "recall": 0.97,
+    "specificity": 1.0,
+    "f1": 0.9847715736040609
+  },
+  "per_defect": {
+    "counter": {
+      "n": 75,
+      "detected": 75
+    },
+    "biased": {
+      "n": 75,
+      "detected": 75
+    },
+    "periodic": {
+      "n": 75,
+      "detected": 75
+    },
+    "low_symbol": {
+      "n": 75,
+      "detected": 75
+    }
+  },
+  "kind": "detector"
+}
