@@ -116,4 +116,5 @@ def evaluate_document(
         "original_valid": original_valid,
         "tampered_valid": tampered_valid,
         "signature_bytes": len(signature),
+        "signature": signature,
     }

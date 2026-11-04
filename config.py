@@ -4,7 +4,9 @@ from modules.crypto import DSAHandler, ElGamalHandler, RSAHandler
 from modules.evaluation.document_test import DOCUMENT_FORMATS, TAMPER_MODES
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-RESULTS_DIR = os.path.join(BASE_DIR, "results")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+DATABASE_PATH = os.path.join(DATA_DIR, "smartkey.db")
+PACKAGES_DIR = os.path.join(DATA_DIR, "packages")
 
 APP_TITLE = "SmartKey"
 PAGE_LAYOUT = "wide"
@@ -53,6 +55,9 @@ EXPERIMENT_TRIALS_SPEC = (1, 30, 3, 1)
 SYNTHETIC_PER_FORMAT_SPEC = (5, 1500, 50, 5)
 DETECTOR_SAMPLES_SPEC = (50, 2000, 300, 50)
 EXPERIMENT_SOURCES = ("Unggah berkas", "Folder lokal", "Dataset sintetis")
+SIGN_SOURCES = ("Unggah berkas", "Teks langsung", "Folder lokal")
+HISTORY_SECTIONS = ("Hasil", "Paket", "Verifikasi", "Kunci")
+RESULT_KINDS = ("experiment", "benchmark", "detector")
 
 BENCHMARK_BIT_LENGTH = 256
 BENCHMARK_BUDGET = 200
@@ -84,12 +89,72 @@ STYLE = {
 
 TEXTS = {
     "title": "SmartKey",
+    "tab_sign": "Sign",
+    "tab_verify": "Verifikasi",
+    "tab_history": "Riwayat",
+    "sidebar_crypto_choice": "Algoritma untuk Sign",
+    "sign_header": "Sign Dokumen",
+    "sign_intro": "Satu seed AI dipakai untuk membuat kunci, lalu setiap dokumen ditandatangani dan dikemas menjadi file bertanda tangan. Banyak dokumen langsung diunduh sebagai satu ZIP.",
+    "sign_source": "Sumber dokumen",
+    "sign_upload": "Unggah satu atau banyak dokumen",
+    "sign_text": "Tulis teks yang akan ditandatangani",
+    "sign_folder": "Path folder dokumen",
+    "sign_limit": "Maksimum dokumen per format",
+    "sign_no_input": "Belum ada dokumen. Unggah berkas, tulis teks, atau isi path folder.",
+    "sign_button": "Sign dokumen",
+    "sign_running": "Membangkitkan seed dan menandatangani",
+    "sign_done": "%d dokumen ditandatangani dengan %s %d bit.",
+    "sign_download_single": "Unduh dokumen bertanda tangan",
+    "sign_download_batch": "Unduh semua dokumen bertanda tangan (satu ZIP)",
+    "sign_saved": "Tersimpan otomatis di %s",
+    "sign_key_info": "Kunci publik terdaftar di database dengan ID %d. Batch ID %d.",
+    "sign_records": "Dokumen yang ditandatangani",
+    "sign_next": "Untuk memeriksa keaslian, unggah berkas ini di tab Verifikasi.",
+    "sign_col_name": "Berkas",
+    "sign_col_format": "Format",
+    "sign_col_size": "Ukuran (byte)",
+    "sign_col_sha": "SHA-256",
+    "sign_col_signature": "Signature (awal)",
+    "verify_header": "Verifikasi Dokumen",
+    "verify_intro": "Unggah dokumen bertanda tangan (.signed.zip) atau ZIP hasil batch. Berkas biasa yang belum ditandatangani akan dinyatakan belum bertanda tangan.",
+    "verify_upload": "Unggah berkas untuk diverifikasi",
+    "verify_button": "Verifikasi",
+    "verify_none": "Belum ada berkas yang diunggah.",
+    "verify_valid": "Valid",
+    "verify_invalid": "Tidak valid",
+    "verify_unsigned": "Belum ditandatangani",
+    "verify_col_name": "Berkas",
+    "verify_col_status": "Status",
+    "verify_col_reason": "Alasan",
+    "verify_col_algo": "Algoritma",
+    "verify_col_key": "Kunci terdaftar",
+    "verify_yes": "Ya",
+    "verify_no": "Tidak",
+    "verify_warn_unregistered": "Sebagian kunci publik tidak terdaftar di database ini. Keaslian pembuat kunci belum terjamin.",
+    "verify_tamper_button": "Uji otomatis dokumen diubah",
+    "verify_tamper_title": "Confusion Matrix Verifikasi Paket",
+    "verify_tamper_note": "Dokumen asli dari paket yang valid diharapkan valid, lalu diubah (balik bit, tambah byte, potong byte) dan diharapkan tidak valid.",
+    "history_section": "Bagian riwayat",
+    "history_header": "Riwayat dari Database",
+    "history_counts": "Isi database",
+    "history_pick": "Pilih hasil tersimpan",
+    "history_show": "Tampilkan",
+    "history_json": "Unduh JSON",
+    "history_none": "Belum ada data tersimpan.",
+    "history_pick_batch": "Pilih batch tanda tangan",
+    "history_download_pkg": "Unduh paket batch",
+    "history_missing": "Berkas paket tidak ditemukan di disk.",
+    "history_docs": "Dokumen dalam batch",
+    "history_sensitive": "Database memuat seed dan kunci publik. Perlakukan folder data sebagai data sensitif.",
+    "experiment_saved": "Hasil tersimpan di database dengan ID %d",
+    "experiment_loaded_db": "Menampilkan hasil terakhir dari database",
+    "experiment_make_packages": "Buat paket tanda tangan untuk semua dokumen (percobaan pertama)",
+    "experiment_packages_ready": "%d paket tanda tangan siap diunduh dalam satu ZIP",
+    "experiment_download_packages": "Unduh semua paket tanda tangan (ZIP)",
     "subtitle": "Analisis pembangkitan seed berbasis AI untuk tanda tangan digital RSA, DSA, dan ElGamal.",
-    "tab_sign": "Tanda Tangan",
     "tab_experiment": "Eksperimen Multi Dokumen",
     "tab_benchmark": "Benchmark AI",
     "tab_dashboard": "Dashboard",
-    "tab_export": "Ekspor dan Riwayat",
     "sidebar_title": "Konfigurasi",
     "sidebar_ai": "Modul AI",
     "sidebar_ai_param": "Parameter AI",
@@ -99,29 +164,9 @@ TEXTS = {
     "sidebar_repro_help": "Hanya untuk riset. Seed hasil mode ini tidak aman untuk kunci sesungguhnya.",
     "sidebar_repro_seed": "Nilai seed reproduksi",
     "sidebar_crypto": "Modul Kriptografi",
-    "sidebar_crypto_choice": "Algoritma untuk mode tunggal",
     "sidebar_key_sizes": "Ukuran kunci per algoritma",
     "sidebar_key_size": "Ukuran kunci %s (bit)",
     "elgamal_warning": "ElGamal memakai grup safe prime standar (RFC 3526). Seed AI menentukan private key, bukan parameter p dan g.",
-    "sign_header": "Tanda Tangan dan Verifikasi",
-    "sign_upload": "Unggah dokumen",
-    "sign_text": "Atau tulis teks langsung",
-    "sign_no_input": "Unggah dokumen atau isi teks untuk memulai.",
-    "sign_hash": "SHA-256 dokumen",
-    "sign_button": "Bangkitkan seed, buat kunci, dan tandatangani",
-    "sign_spinner": "Membangkitkan seed dan menandatangani",
-    "sign_done": "Tanda tangan dibuat dengan %s dan %s.",
-    "sign_signature": "Signature (hex)",
-    "verify_button": "Verifikasi dokumen saat ini",
-    "verify_none": "Belum ada tanda tangan pada sesi ini.",
-    "verify_ok": "Verifikasi berhasil: tanda tangan valid dan dokumen asli.",
-    "verify_fail": "Verifikasi gagal: tanda tangan tidak valid atau dokumen telah diubah.",
-    "tamper_button": "Uji otomatis dokumen yang diubah",
-    "tamper_title": "Hasil uji dokumen diubah",
-    "tamper_col_case": "Kasus",
-    "tamper_col_valid": "Dinyatakan valid",
-    "tamper_col_expected": "Seharusnya valid",
-    "tamper_original": "dokumen asli",
     "experiment_header": "Eksperimen Multi Dokumen",
     "experiment_intro": "Satu seed AI per percobaan dipakai bersama oleh RSA, DSA, dan ElGamal melalui turunan seed per algoritma. Setiap dokumen ditandatangani, diverifikasi, lalu diubah dan diverifikasi ulang.",
     "experiment_source": "Sumber dokumen",
@@ -134,7 +179,6 @@ TEXTS = {
     "experiment_run": "Jalankan eksperimen",
     "experiment_none": "Belum ada dokumen yang dimuat.",
     "experiment_running": "Menjalankan eksperimen",
-    "experiment_saved": "Hasil disimpan di %s",
     "experiment_docs": "Dokumen diuji",
     "experiment_confusion": "Confusion Matrix Verifikasi Dokumen",
     "experiment_timing": "Waktu per Algoritma",
@@ -173,15 +217,6 @@ TEXTS = {
     "dashboard_note": "Ini uji lulus atau gagal, bukan peringkat kualitas. Seed acak sejati lolos semua tes sekitar 95% dari waktu.",
     "dashboard_insecure": "Sumber acak: %s. Seed ini tidak aman untuk kunci sesungguhnya.",
     "dashboard_source": "Sumber acak seed: %s",
-    "export_header": "Ekspor dan Riwayat",
-    "export_none": "Belum ada data untuk diekspor.",
-    "export_single": "Unduh laporan tanda tangan (JSON)",
-    "export_sig": "Unduh signature (.sig)",
-    "export_experiment": "Unduh laporan eksperimen (JSON)",
-    "export_benchmark": "Unduh laporan benchmark (JSON)",
-    "export_history": "Hasil tersimpan di folder results",
-    "export_history_none": "Belum ada hasil tersimpan.",
-    "export_sensitive": "Berkas hasil memuat seed dan kunci publik. Perlakukan folder results sebagai data sensitif.",
     "test_pass": "Lulus",
     "test_fail": "Gagal",
     "label_valid": "Valid",
@@ -199,3 +234,18 @@ TEXTS = {
 }
 
 NIST_COLUMNS = ("Uji", "p-value", "Status")
+
+STATUS_LABELS = {
+    "valid": TEXTS["verify_valid"],
+    "invalid": TEXTS["verify_invalid"],
+    "unsigned": TEXTS["verify_unsigned"],
+}
+
+REASON_LABELS = {
+    "ok": "Tanda tangan sesuai dan dokumen asli",
+    "unsigned": "Berkas tidak berisi tanda tangan SmartKey",
+    "bad_package": "Paket rusak atau tidak lengkap",
+    "document_modified": "Dokumen telah diubah setelah ditandatangani",
+    "signature_invalid": "Tanda tangan tidak cocok dengan dokumen",
+    "manifest_mismatch": "Data manifest tidak cocok dengan dokumen",
+}

@@ -4,11 +4,11 @@ Aplikasi riset berbasis Streamlit untuk menganalisis pembangkitan seed berbasis 
 
 ## Alur Sistem
 
-1. AI menghasilkan satu seed mentah per percobaan. Objek yang dioptimasi adalah seed, dengan kriteria penalti keacakan (monobit, autokorelasi, block frequency).
-2. Dari satu seed mentah itu diturunkan seed terpisah untuk tiap algoritma dan ukuran kunci memakai HMAC-SHA256 dengan label domain, lalu diperluas menjadi aliran byte deterministik untuk pembangkit kunci.
-3. Dokumen (PDF, DOCX, TXT, PNG, JPG) hanya dipakai sebagai bahan uji: di-hash dengan SHA-256, ditandatangani, diverifikasi, diubah, lalu diverifikasi ulang.
+1. Tab Sign: AI menghasilkan satu seed mentah, lalu seed diturunkan per algoritma dan ukuran kunci (HMAC-SHA256 dengan label domain). Satu atau banyak dokumen ditandatangani. Hasilnya berupa file bertanda tangan `.signed.zip` (dokumen asli, signature, kunci publik, dan manifest). Banyak dokumen langsung diunduh sebagai satu ZIP dan tersimpan otomatis di `data/packages`.
+2. Tab Verifikasi: unggah file `.signed.zip` atau ZIP hasil batch. Hasilnya Valid, Tidak valid (dokumen diubah, tanda tangan tidak cocok, atau paket rusak), atau Belum ditandatangani untuk berkas biasa. Kunci publik dicocokkan dengan registri kunci di database.
+3. Tab Eksperimen Multi Dokumen: seed yang sama dipakai RSA, DSA, dan ElGamal per percobaan. Setiap dokumen ditandatangani, diverifikasi, diubah, lalu diverifikasi ulang. Paket tanda tangan semua dokumen dapat diunduh sebagai satu ZIP.
 4. Seed dievaluasi dengan entropi Shannon, uji entropi terkalibrasi, uji entropi selisih, dan NIST (Frequency, Block Frequency, Runs).
-5. Hasil disimpan ke folder `results` sebagai JSON lengkap dengan seed, parameter, kunci publik, dan waktu.
+5. Semua data disimpan di database SQLite `data/smartkey.db` (kunci, batch, dokumen bertanda tangan, verifikasi, hasil eksperimen dan benchmark). Tab Riwayat memanggil kembali data dari database.
 
 ## Confusion Matrix
 
@@ -45,7 +45,9 @@ Aplikasi terbuka di http://localhost:8501. Untuk menjalankan test: `pytest tests
 - `modules/ai`: GA, ANN, ACO, dan sumber entropi.
 - `modules/crypto`: derivasi seed, pembangkit kunci, tanda tangan, dan verifikasi.
 - `modules/evaluation`: entropi, NIST, benchmark, confusion matrix, uji dokumen, kurva konvergensi.
-- `modules/experiment`: runner eksperimen multi dokumen dan penyimpanan hasil.
+- `modules/signing`: paket tanda tangan, verifikasi, dan layanan sign banyak dokumen.
+- `modules/db`: repository SQLite.
+- `modules/experiment`: runner eksperimen multi dokumen.
 - `ui`: komponen Streamlit.
 - `tests`: pengujian otomatis.
 
@@ -53,4 +55,4 @@ Aplikasi terbuka di http://localhost:8501. Untuk menjalankan test: `pytest tests
 
 - ElGamal memakai grup safe prime standar (RFC 3526, 2048 dan 4096 bit). Seed AI menentukan private key, sedangkan p dan g tetap. Ini membuat keygen ElGamal cepat.
 - Mode reproduksi memakai PRNG ber-seed dan tidak aman untuk kunci sesungguhnya.
-- Folder `results` memuat seed dan kunci publik. Perlakukan sebagai data sensitif.
+- Folder `data` memuat database dan paket yang berisi seed serta kunci publik. Perlakukan sebagai data sensitif.

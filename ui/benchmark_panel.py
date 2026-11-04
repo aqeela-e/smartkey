@@ -7,7 +7,6 @@ from config import (
     BENCHMARK_BUDGET,
     BENCHMARK_TOLERANCE,
     BENCHMARK_TRIALS_SPEC,
-    RESULTS_DIR,
     TEXTS,
 )
 from modules.evaluation.benchmark import (
@@ -18,7 +17,6 @@ from modules.evaluation.benchmark import (
     report_to_tables,
     run_benchmark,
 )
-from modules.experiment.storage import save_result
 from ui.charts import rate_with_interval, show
 
 
@@ -65,7 +63,7 @@ def render_benchmark_report(report: dict) -> None:
         st.caption(note)
 
 
-def render_benchmark_panel() -> None:
+def render_benchmark_panel(repository) -> None:
     st.subheader(TEXTS["benchmark_header"])
     st.caption(TEXTS["benchmark_intro"])
     low, high, default, step = BENCHMARK_TRIALS_SPEC
@@ -95,11 +93,18 @@ def render_benchmark_panel() -> None:
             "n_trials": int(n_trials),
         }
         st.session_state["benchmark"] = report
-        st.session_state["benchmark_path"] = save_result(report, "benchmark", RESULTS_DIR)
+        st.session_state["benchmark_id"] = repository.save_result(
+            "benchmark", report, "N=%d | %d bit" % (int(n_trials), BENCHMARK_BIT_LENGTH)
+        )
 
     report = st.session_state.get("benchmark")
     if report:
-        st.caption(TEXTS["experiment_saved"] % st.session_state.get("benchmark_path", RESULTS_DIR))
+        st.caption(TEXTS["experiment_saved"] % st.session_state["benchmark_id"])
+    else:
+        report = repository.latest_result("benchmark")
+        if report:
+            st.caption(TEXTS["experiment_loaded_db"])
+    if report:
         render_benchmark_report(report)
     else:
         st.info(TEXTS["benchmark_none"])

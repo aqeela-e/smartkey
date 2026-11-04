@@ -1,5 +1,8 @@
+from Crypto.PublicKey import DSA, ElGamal, RSA
+
 from .dsa_handler import DSAHandler
 from .elgamal_handler import ElGamalHandler
+from .fingerprint import key_fingerprint
 from .prng import derive_seed
 from .rsa_handler import RSAHandler
 
@@ -41,3 +44,16 @@ class CryptoKeyGenerator:
                 "y": format(int(public_key.y), "x"),
             }
         return public_key.export_key().decode("utf-8")
+
+    def import_public_key(self, export):
+        if self.algorithm == "ELGAMAL":
+            return ElGamal.construct(
+                (int(export["p"], 16), int(export["g"], 16), int(export["y"], 16))
+            )
+        if self.algorithm == "RSA":
+            return RSA.import_key(export)
+        return DSA.import_key(export)
+
+    @staticmethod
+    def fingerprint(export) -> str:
+        return key_fingerprint(export)

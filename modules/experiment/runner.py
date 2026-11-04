@@ -87,6 +87,7 @@ def run_experiment(
     limit_per_format: Optional[int] = None,
     random_state_base: Optional[int] = None,
     progress: Optional[Callable[[float], None]] = None,
+    signature_sink: Optional[Callable[[str, str, bytes, bytes], None]] = None,
 ) -> dict:
     if n_trials < 1:
         raise ValueError("n_trials minimal 1")
@@ -139,10 +140,12 @@ def run_experiment(
             }
 
             for label, docs in groups.items():
-                for _, data in docs:
+                for name, data in docs:
                     outcome = evaluate_document(
                         crypto_gen, private_key, public_key, data, tamper_modes
                     )
+                    if signature_sink is not None and t == 0:
+                        signature_sink(algorithm, name, data, outcome["signature"])
                     sign_ms[algorithm].append(outcome["sign_ms"])
                     verify_ms[algorithm].append(outcome["verify_ms"])
                     signature_bytes[algorithm] = outcome["signature_bytes"]

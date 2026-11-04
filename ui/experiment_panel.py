@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 import streamlit as st
 
@@ -8,7 +10,7 @@ from config import (
     EXPERIMENT_SOURCES,
     EXPERIMENT_TRIALS_SPEC,
     MAX_FILES_PER_FORMAT,
-    RESULTS_DIR,
+    PACKAGES_DIR,
     SYNTHETIC_PER_FORMAT_SPEC,
     TEXTS,
     UPLOAD_TYPES,
@@ -20,7 +22,7 @@ from modules.evaluation.document_test import (
     synthetic_documents,
 )
 from modules.experiment.runner import build_ai_kwargs, run_experiment
-from modules.experiment.storage import save_result
+from modules.signing import package_experiment
 from ui.charts import confusion_heatmap, convergence_plot, grouped_bars, ring_chart, show
 
 METRIC_COLUMNS = ("accuracy", "precision", "recall", "specificity", "f1")
@@ -46,7 +48,7 @@ def _gather_documents(source: str, limit: int):
     return lambda: synthetic_documents(int(count))
 
 
-def _render_experiment(result: dict) -> None:
+def render_experiment_result(result: dict) -> None:
     summary = result["summary"]
     docs = result["documents"]
     quality = result["seed_quality"]
@@ -140,7 +142,7 @@ def _render_experiment(result: dict) -> None:
     )
 
 
-def _render_detector(result: dict) -> None:
+def render_detector_result(result: dict) -> None:
     labels_actual = [TEXTS["label_random"], TEXTS["label_defective"]]
     labels_pred = [TEXTS["label_passed"], TEXTS["label_failed"]]
     left, right = st.columns(2)
@@ -164,7 +166,7 @@ def _render_detector(result: dict) -> None:
     )
 
 
-def render_experiment_panel(config: dict) -> None:
+def render_experiment_panel(config: dict, repository) -> None:
     st.subheader(TEXTS["experiment_header"])
     st.caption(TEXTS["experiment_intro"])
 
@@ -178,8 +180,8 @@ def render_experiment_panel(config: dict) -> None:
     low, high, default, step = EXPERIMENT_TRIALS_SPEC
     n_trials = st.slider(TEXTS["experiment_trials"], low, high, default, step, key="experiment_trials")
     modes = st.multiselect(TEXTS["experiment_modes"], TAMPER_MODES, default=list(TAMPER_MODES), key="experiment_modes")
-    if "ElGamal" in CRYPTO_ALGORITHMS:
-        st.caption(TEXTS["elgamal_warning"])
+    make_packages = st.checkbox(TEXTS["experiment_make_packages"], value=False, key="experiment_make_packages")
+    st.caption(TEXTS["elgamal_warning"])
 
     if st.button(TEXTS["experiment_run"], type="primary", key="experiment_run"):
         documents = collect()
@@ -190,6 +192,11 @@ def render_experiment_panel(config: dict) -> None:
                 config["ai_params"], config["bit_length"], config["tolerance_sigma"], None
             )
             bar = st.progress(0.0, text=TEXTS["experiment_running"])
+            entries = {algorithm: [] for algorithm in config["key_sizes"]}
+
+            def sink(algorithm, name, data, signature):
+                entries[algorithm].append((name, data, signature))
+
             result = run_experiment(
                 documents,
                 config["ai_choice"],
@@ -200,17 +207,45 @@ def render_experiment_panel(config: dict) -> None:
                 limit_per_format=int(limit),
                 random_state_base=config["random_state"],
                 progress=lambda fraction: bar.progress(min(max(fraction, 0.0), 1.0)),
+                signature_sink=sink if make_packages else None,
             )
             bar.empty()
             st.session_state["experiment"] = result
-            st.session_state["experiment_path"] = save_result(result, "experiment", RESULTS_DIR)
+            st.session_state["experiment_id"] = repository.save_result(
+                "experiment",
+                result,
+                "%s | %d dokumen | %d percobaan"
+                % (AI_LABELS[result["config"]["ai"]], result["documents"]["total"], int(n_trials)),
+            )
+            st.session_state.pop("experiment_packages", None)
+            if make_packages:
+                path, total = package_experiment(repository, entries, result, PACKAGES_DIR)
+                st.session_state["experiment_packages"] = {"path": path, "total": total}
 
     result = st.session_state.get("experiment")
     if result:
         st.caption(
-            "%s | %s" % (AI_LABELS[result["config"]["ai"]], TEXTS["experiment_saved"] % st.session_state.get("experiment_path", RESULTS_DIR))
+            "%s | %s"
+            % (AI_LABELS[result["config"]["ai"]], TEXTS["experiment_saved"] % st.session_state["experiment_id"])
         )
-        _render_experiment(result)
+    else:
+        result = repository.latest_result("experiment")
+        if result:
+            st.caption(TEXTS["experiment_loaded_db"])
+    if result:
+        packages = st.session_state.get("experiment_packages")
+        if packages and os.path.exists(packages["path"]):
+            st.success(TEXTS["experiment_packages_ready"] % packages["total"])
+            with open(packages["path"], "rb") as handle:
+                st.download_button(
+                    TEXTS["experiment_download_packages"],
+                    handle.read(),
+                    file_name="experiment_signed_packages.zip",
+                    mime="application/zip",
+                    type="primary",
+                    key="experiment_download_packages",
+                )
+        render_experiment_result(result)
 
     st.divider()
     st.subheader(TEXTS["detector_header"])
@@ -221,6 +256,9 @@ def render_experiment_panel(config: dict) -> None:
         detector = randomness_detector_confusion(int(samples), config["bit_length"])
         detector["kind"] = "detector"
         st.session_state["detector"] = detector
-        save_result(detector, "detector", RESULTS_DIR)
-    if st.session_state.get("detector"):
-        _render_detector(st.session_state["detector"])
+        repository.save_result(
+            "detector", detector, "%d seed per kelas | %d bit" % (int(samples), config["bit_length"])
+        )
+    detector_result = st.session_state.get("detector") or repository.latest_result("detector")
+    if detector_result:
+        render_detector_result(detector_result)
