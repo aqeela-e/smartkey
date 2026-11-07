@@ -1,3 +1,4 @@
+import mimetypes
 import os
 
 import pandas as pd
@@ -68,7 +69,7 @@ def _packages_section(repository) -> None:
                 TEXTS["history_download_pkg"],
                 handle.read(),
                 file_name=os.path.basename(path),
-                mime="application/zip",
+                mime=mimetypes.guess_type(path)[0] or "application/octet-stream",
                 key="history_download_pkg",
             )
     else:

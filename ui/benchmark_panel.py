@@ -99,11 +99,13 @@ def render_benchmark_panel(repository) -> None:
 
     report = st.session_state.get("benchmark")
     if report:
-        st.caption(TEXTS["experiment_saved"] % st.session_state["benchmark_id"])
+        info = repository.result_info(st.session_state["benchmark_id"])
+        st.caption(TEXTS["experiment_saved"] % (info["id"], info["created_at"]))
     else:
-        report = repository.latest_result("benchmark")
-        if report:
-            st.caption(TEXTS["experiment_loaded_db"])
+        latest = repository.latest("benchmark")
+        report = latest["payload"] if latest else None
+        if latest:
+            st.caption(TEXTS["experiment_loaded_db"] % (latest["id"], latest["created_at"]))
     if report:
         render_benchmark_report(report)
     else:

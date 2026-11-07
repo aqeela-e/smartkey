@@ -42,3 +42,15 @@ def test_counts(repository):
     counts = repository.counts()
     assert set(counts) == {"keys", "batches", "signed_documents", "verifications", "results"}
     assert all(v == 0 for v in counts.values())
+
+
+def test_latest_and_result_info_expose_id_and_timestamp(repository):
+    assert repository.latest("experiment") is None
+    first = repository.save_result("experiment", {"a": 1}, "satu")
+    second = repository.save_result("experiment", {"a": 2}, "dua")
+    latest = repository.latest("experiment")
+    assert latest["id"] == second and latest["payload"] == {"a": 2} and latest["summary"] == "dua"
+    assert len(latest["created_at"]) == 19
+    info = repository.result_info(first)
+    assert info["id"] == first and info["kind"] == "experiment" and info["created_at"]
+    assert repository.result_info(9999) is None

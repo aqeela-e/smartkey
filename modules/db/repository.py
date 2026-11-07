@@ -258,12 +258,32 @@ class Repository:
             ).fetchone()
         return json.loads(row["payload"]) if row else None
 
-    def latest_result(self, kind: str) -> Optional[dict]:
+    def latest(self, kind: str) -> Optional[dict]:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT payload FROM results WHERE kind = ? ORDER BY id DESC LIMIT 1", (kind,)
+                "SELECT id, summary, payload, created_at FROM results "
+                "WHERE kind = ? ORDER BY id DESC LIMIT 1",
+                (kind,),
             ).fetchone()
-        return json.loads(row["payload"]) if row else None
+        if not row:
+            return None
+        return {
+            "id": int(row["id"]),
+            "summary": row["summary"],
+            "created_at": row["created_at"],
+            "payload": json.loads(row["payload"]),
+        }
+
+    def latest_result(self, kind: str) -> Optional[dict]:
+        latest = self.latest(kind)
+        return latest["payload"] if latest else None
+
+    def result_info(self, result_id: int) -> Optional[dict]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id, kind, summary, created_at FROM results WHERE id = ?", (result_id,)
+            ).fetchone()
+        return dict(row) if row else None
 
     def counts(self) -> Dict[str, int]:
         tables = ("keys", "batches", "signed_documents", "verifications", "results")

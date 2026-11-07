@@ -1,3 +1,4 @@
+import mimetypes
 import os
 
 import pandas as pd
@@ -43,6 +44,13 @@ def _download_name(result: dict) -> str:
     return "signed_documents.zip"
 
 
+def _download_mime(result: dict) -> str:
+    if result["kind"] != "single":
+        return "application/zip"
+    guessed, _ = mimetypes.guess_type(_download_name(result))
+    return guessed or "application/octet-stream"
+
+
 def _render_result(result: dict, repository) -> None:
     st.success(
         TEXTS["sign_done"] % (result["doc_count"], result["algorithm"], result["key_size"])
@@ -62,10 +70,14 @@ def _render_result(result: dict, repository) -> None:
             label,
             payload,
             file_name=_download_name(result),
-            mime="application/zip",
+            mime=_download_mime(result),
             type="primary",
             key="sign_download",
         )
+    if result.get("standard_pdf_count"):
+        st.info(TEXTS["sign_standard_pdf"] % result["standard_pdf_count"])
+    elif result.get("pdf_count"):
+        st.caption(TEXTS["sign_standard_note"])
     st.caption(TEXTS["sign_next"])
 
     rows = repository.list_signed_documents(result["batch_id"], 50)

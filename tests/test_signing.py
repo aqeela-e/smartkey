@@ -1,5 +1,4 @@
 import io
-import json
 import os
 import zipfile
 
@@ -9,23 +8,22 @@ from modules.db import Repository
 from modules.evaluation.document_test import synthetic_documents
 from modules.experiment.runner import build_ai_kwargs
 from modules.signing import (
-    PACKAGE_SUFFIX,
     STATUS_INVALID,
     STATUS_UNSIGNED,
     STATUS_VALID,
-    build_package,
+    build_signed_file,
     check_signature,
     expand_uploads,
-    read_package,
+    has_signature,
+    read_signed,
     sign_documents,
     verify_package,
 )
 from modules.signing.package import (
-    DOCUMENT_DIR,
+    EMBED_END,
     REASON_BAD_PACKAGE,
     REASON_MODIFIED,
     REASON_OK,
-    REASON_SIGNATURE,
     REASON_UNSIGNED,
 )
 
@@ -37,31 +35,32 @@ def repository(tmp_path):
     return Repository(str(tmp_path / "test.db"))
 
 
-def signed_batch(repository, tmp_path, count=4, algorithm="RSA", size=1024):
-    documents = synthetic_documents(1)[:count]
-    result = sign_documents(
+def sign(repository, tmp_path, documents, algorithm="RSA", size=1024):
+    return sign_documents(
         documents, "ACO", AI_KWARGS, algorithm, size, repository, str(tmp_path / "packages")
     )
-    return documents, result
 
 
-def rewrite_member(package_bytes, member, new_content):
-    source = zipfile.ZipFile(io.BytesIO(package_bytes))
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as target:
-        for info in source.infolist():
-            content = new_content if info.filename == member else source.read(info.filename)
-            target.writestr(info.filename, content)
-    return buffer.getvalue()
+def read(path):
+    with open(path, "rb") as handle:
+        return handle.read()
 
 
-def test_single_document_package_differs_from_original_and_verifies(repository, tmp_path):
-    documents, result = signed_batch(repository, tmp_path, count=1)
+def test_single_document_stays_a_single_file_in_original_format(repository, tmp_path):
+    original = b"\x89PNG\r\n\x1a\n" + os.urandom(500)
+    result = sign(repository, tmp_path, [("gambar.png", original)])
     assert result["kind"] == "single"
-    assert result["package_path"].endswith(PACKAGE_SUFFIX)
-    package_bytes = open(result["package_path"], "rb").read()
-    assert package_bytes != documents[0][1]
-    outcome = verify_package(package_bytes, repository.find_key)
+    assert result["package_path"].endswith("_gambar.png")
+    assert not zipfile.is_zipfile(result["package_path"])
+    signed = read(result["package_path"])
+    assert signed != original
+    assert signed.startswith(original)
+    assert has_signature(signed)
+
+
+def test_signed_single_file_verifies_and_is_registered(repository, tmp_path):
+    result = sign(repository, tmp_path, [("a.txt", b"isi dokumen")])
+    outcome = verify_package(read(result["package_path"]), repository.find_key)
     assert outcome["status"] == STATUS_VALID
     assert outcome["reason"] == REASON_OK
     assert outcome["key_registered"] is True
@@ -73,61 +72,70 @@ def test_unsigned_file_is_reported_unsigned(repository):
     assert outcome["reason"] == REASON_UNSIGNED
 
 
-def test_modified_document_inside_package_is_invalid(repository, tmp_path):
-    documents, result = signed_batch(repository, tmp_path, count=1)
-    package_bytes = open(result["package_path"], "rb").read()
-    name = documents[0][0]
-    altered = rewrite_member(package_bytes, DOCUMENT_DIR + name, documents[0][1] + b"x")
-    outcome = verify_package(altered, repository.find_key)
+def test_modified_document_is_invalid(repository, tmp_path):
+    original = b"isi dokumen yang cukup panjang untuk diubah"
+    result = sign(repository, tmp_path, [("a.txt", original)])
+    signed = bytearray(read(result["package_path"]))
+    signed[3] ^= 0x01
+    outcome = verify_package(bytes(signed), repository.find_key)
     assert outcome["status"] == STATUS_INVALID
     assert outcome["reason"] == REASON_MODIFIED
 
 
-def test_corrupted_signature_is_invalid(repository, tmp_path):
-    _, result = signed_batch(repository, tmp_path, count=1)
-    package_bytes = open(result["package_path"], "rb").read()
-    signature = bytearray(read_package(package_bytes)["signature"])
-    signature[0] ^= 0x01
-    altered = rewrite_member(package_bytes, "signature.sig", bytes(signature))
-    outcome = verify_package(altered, repository.find_key)
-    assert outcome["status"] == STATUS_INVALID
-    assert outcome["reason"] == REASON_SIGNATURE
-
-
-def test_broken_manifest_is_bad_package(repository, tmp_path):
-    _, result = signed_batch(repository, tmp_path, count=1)
-    package_bytes = open(result["package_path"], "rb").read()
-    altered = rewrite_member(package_bytes, "manifest.json", json.dumps({"x": 1}))
-    outcome = verify_package(altered, repository.find_key)
+def test_corrupted_trailer_is_bad_package(repository, tmp_path):
+    result = sign(repository, tmp_path, [("a.txt", b"isi")])
+    signed = read(result["package_path"])
+    broken = signed[:-20] + b"x" * 12 + EMBED_END
+    outcome = verify_package(broken, repository.find_key)
     assert outcome["status"] == STATUS_INVALID
     assert outcome["reason"] == REASON_BAD_PACKAGE
 
 
-def test_unregistered_key_is_flagged(tmp_path, repository):
-    documents, result = signed_batch(repository, tmp_path, count=1)
-    package_bytes = open(result["package_path"], "rb").read()
+def test_unregistered_key_is_flagged(repository, tmp_path):
+    result = sign(repository, tmp_path, [("a.txt", b"isi")])
     other = Repository(str(tmp_path / "other.db"))
-    outcome = verify_package(package_bytes, other.find_key)
+    outcome = verify_package(read(result["package_path"]), other.find_key)
     assert outcome["status"] == STATUS_VALID
     assert outcome["key_registered"] is False
 
 
 @pytest.mark.parametrize("algorithm,size", [("RSA", 1024), ("DSA", 1024), ("ElGamal", 2048)])
-def test_batch_zip_contains_every_signed_package(repository, tmp_path, algorithm, size):
-    documents, result = signed_batch(repository, tmp_path, count=5, algorithm=algorithm, size=size)
+def test_batch_is_one_zip_of_signed_files(repository, tmp_path, algorithm, size):
+    documents = synthetic_documents(1)[:5]
+    result = sign(repository, tmp_path, documents, algorithm, size)
     assert result["kind"] == "batch"
+    assert result["package_path"].endswith(".zip")
     archive = zipfile.ZipFile(result["package_path"])
-    packages = [n for n in archive.namelist() if n.endswith(PACKAGE_SUFFIX)]
-    assert len(packages) == 5
-    assert "index.csv" in archive.namelist()
-    expanded = expand_uploads("batch.zip", open(result["package_path"], "rb").read())
+    names = archive.namelist()
+    assert sorted(names) == sorted(d[0] for d in documents)
+    expanded = expand_uploads("batch.zip", read(result["package_path"]))
     assert len(expanded) == 5
     for _, data in expanded:
         assert verify_package(data, repository.find_key)["status"] == STATUS_VALID
 
 
+def test_plain_zip_is_treated_as_one_unsigned_file():
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("a.txt", b"biasa")
+    expanded = expand_uploads("plain.zip", buffer.getvalue())
+    assert len(expanded) == 1
+    assert verify_package(expanded[0][1])["status"] == STATUS_UNSIGNED
+
+
+def test_signed_zip_based_document_is_not_split(repository, tmp_path):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("word/document.xml", b"<xml/>")
+    result = sign(repository, tmp_path, [("laporan.docx", buffer.getvalue())])
+    signed = read(result["package_path"])
+    assert len(expand_uploads("laporan.docx", signed)) == 1
+    assert verify_package(signed, repository.find_key)["status"] == STATUS_VALID
+
+
 def test_batch_records_are_stored_in_database(repository, tmp_path):
-    documents, result = signed_batch(repository, tmp_path, count=3)
+    documents = synthetic_documents(1)[:3]
+    result = sign(repository, tmp_path, documents)
     batch = repository.get_batch(result["batch_id"])
     assert batch["doc_count"] == 3 and os.path.exists(batch["package_path"])
     rows = repository.list_signed_documents(result["batch_id"])
@@ -137,22 +145,22 @@ def test_batch_records_are_stored_in_database(repository, tmp_path):
 
 def test_duplicate_names_are_made_unique(repository, tmp_path):
     documents = [("a.txt", b"1"), ("a.txt", b"2"), ("sub/a.txt", b"3")]
-    result = sign_documents(
-        documents, "ACO", AI_KWARGS, "RSA", 1024, repository, str(tmp_path / "packages")
-    )
-    archive = zipfile.ZipFile(result["package_path"])
-    names = [n for n in archive.namelist() if n.endswith(PACKAGE_SUFFIX)]
-    assert len(set(names)) == 3
+    result = sign(repository, tmp_path, documents)
+    names = zipfile.ZipFile(result["package_path"]).namelist()
+    assert len(names) == 3 and len(set(names)) == 3
 
 
 def test_check_signature_detects_modified_document(repository, tmp_path):
-    documents, result = signed_batch(repository, tmp_path, count=1)
-    package = read_package(open(result["package_path"], "rb").read())
-    assert check_signature(package, documents[0][1]) is True
-    assert check_signature(package, documents[0][1][:-1]) is False
+    original = b"dokumen asli"
+    result = sign(repository, tmp_path, [("a.txt", original)])
+    package = read_signed(read(result["package_path"]))
+    assert package["document"] == original
+    assert check_signature(package, original) is True
+    assert check_signature(package, original[:-1]) is False
 
 
-def test_build_package_roundtrip():
-    package = build_package("x.txt", b"isi", b"sig", "RSA", 1024, "pem")
-    parsed = read_package(package)
-    assert parsed["document"] == b"isi" and parsed["manifest"]["algorithm"] == "RSA"
+def test_build_signed_file_roundtrip():
+    signed = build_signed_file(b"isi", b"sig", "RSA", 1024, "pem")
+    parsed = read_signed(signed)
+    assert parsed["document"] == b"isi" and parsed["signature"] == b"sig"
+    assert parsed["manifest"]["algorithm"] == "RSA"

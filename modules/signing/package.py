@@ -1,20 +1,23 @@
+import base64
 import hashlib
-import io
 import json
 import os
+import struct
 import time
 import zipfile
+import io
 from typing import Callable, List, Optional, Tuple
 
 from modules.crypto.fingerprint import key_fingerprint
 from modules.crypto.key_generator import CryptoKeyGenerator
+from modules.evaluation.document_test import TAMPER_MODES, tamper
 
-PACKAGE_SUFFIX = ".signed.zip"
-MANIFEST_NAME = "manifest.json"
-SIGNATURE_NAME = "signature.sig"
-PUBLIC_KEY_NAME = "public_key.json"
-DOCUMENT_DIR = "document/"
-PACKAGE_VERSION = 1
+from . import pdf_standard
+from .errors import NotAPackage, PackageError
+
+EMBED_START = b"\n--SMARTKEY-SIGNATURE-BEGIN--\n"
+EMBED_END = b"SMKYSIG1"
+EMBED_VERSION = 1
 
 STATUS_VALID = "valid"
 STATUS_INVALID = "invalid"
@@ -26,16 +29,9 @@ REASON_BAD_PACKAGE = "bad_package"
 REASON_MODIFIED = "document_modified"
 REASON_SIGNATURE = "signature_invalid"
 REASON_MANIFEST = "manifest_mismatch"
+REASON_CERTIFICATE = "certificate_invalid"
 
-REQUIRED_MANIFEST_KEYS = ("document_name", "sha256", "algorithm", "key_size")
-
-
-class PackageError(Exception):
-    pass
-
-
-class NotAPackage(PackageError):
-    pass
+REQUIRED_META_KEYS = ("algorithm", "key_size", "sha256", "signature", "public_key")
 
 
 def safe_name(name: str) -> str:
@@ -43,8 +39,15 @@ def safe_name(name: str) -> str:
     return base or "dokumen"
 
 
-def build_package(
-    name: str,
+def has_signature(data: bytes) -> bool:
+    return data.endswith(EMBED_END)
+
+
+def is_signed(data: bytes) -> bool:
+    return has_signature(data) or pdf_standard.is_signed_pdf(data)
+
+
+def build_signed_file(
     data: bytes,
     signature: bytes,
     algorithm: str,
@@ -52,45 +55,44 @@ def build_package(
     public_key_export,
     ai: Optional[str] = None,
 ) -> bytes:
-    filename = safe_name(name)
-    manifest = {
-        "version": PACKAGE_VERSION,
-        "document_name": filename,
-        "sha256": hashlib.sha256(data).hexdigest(),
+    meta = {
+        "version": EMBED_VERSION,
         "algorithm": algorithm.upper(),
         "key_size": int(key_size),
+        "sha256": hashlib.sha256(data).hexdigest(),
         "key_fingerprint": key_fingerprint(public_key_export),
         "ai": ai,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "signature": base64.b64encode(signature).decode("ascii"),
+        "public_key": public_key_export,
     }
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(MANIFEST_NAME, json.dumps(manifest, indent=2))
-        archive.writestr(SIGNATURE_NAME, signature)
-        archive.writestr(PUBLIC_KEY_NAME, json.dumps(public_key_export))
-        archive.writestr(DOCUMENT_DIR + filename, data)
-    return buffer.getvalue()
+    payload = json.dumps(meta, separators=(",", ":")).encode("utf-8")
+    return data + EMBED_START + payload + struct.pack(">I", len(payload)) + EMBED_END
 
 
-def read_package(data: bytes) -> dict:
+def read_signed(data: bytes) -> dict:
+    if not has_signature(data) or len(data) < len(EMBED_END) + 4:
+        raise NotAPackage("Tidak ada tanda tangan")
     try:
-        archive = zipfile.ZipFile(io.BytesIO(data))
-    except zipfile.BadZipFile:
-        raise NotAPackage("Bukan arsip ZIP")
-    if MANIFEST_NAME not in archive.namelist():
-        raise NotAPackage("Manifest tidak ditemukan")
-    try:
-        manifest = json.loads(archive.read(MANIFEST_NAME))
-        if not all(key in manifest for key in REQUIRED_MANIFEST_KEYS):
-            raise PackageError("Manifest tidak lengkap")
+        (length,) = struct.unpack(">I", data[-len(EMBED_END) - 4 : -len(EMBED_END)])
+        payload_end = len(data) - len(EMBED_END) - 4
+        payload_start = payload_end - length
+        marker_start = payload_start - len(EMBED_START)
+        if marker_start < 0 or data[marker_start:payload_start] != EMBED_START:
+            raise PackageError("Penanda tanda tangan rusak")
+        meta = json.loads(data[payload_start:payload_end])
+        if not all(key in meta for key in REQUIRED_META_KEYS):
+            raise PackageError("Data tanda tangan tidak lengkap")
         return {
-            "manifest": manifest,
-            "signature": archive.read(SIGNATURE_NAME),
-            "public_key": json.loads(archive.read(PUBLIC_KEY_NAME)),
-            "document": archive.read(DOCUMENT_DIR + manifest["document_name"]),
+            "manifest": {key: meta[key] for key in meta if key not in ("signature", "public_key")},
+            "signature": base64.b64decode(meta["signature"]),
+            "public_key": meta["public_key"],
+            "document": data[:marker_start],
         }
-    except (KeyError, ValueError, TypeError, zipfile.BadZipFile):
-        raise PackageError("Paket rusak")
+    except PackageError:
+        raise
+    except (ValueError, TypeError, struct.error):
+        raise PackageError("Data tanda tangan rusak")
 
 
 def check_signature(package: dict, document: bytes) -> bool:
@@ -103,10 +105,8 @@ def check_signature(package: dict, document: bytes) -> bool:
         return False
 
 
-def verify_package(
-    data: bytes, lookup_key: Optional[Callable[[str], Optional[dict]]] = None
-) -> dict:
-    result = {
+def _blank_result() -> dict:
+    return {
         "status": STATUS_INVALID,
         "reason": REASON_BAD_PACKAGE,
         "document_name": None,
@@ -119,8 +119,51 @@ def verify_package(
         "key_fingerprint": None,
         "key_id": None,
     }
+
+
+def _verify_standard_pdf(data: bytes, lookup_key, result: dict) -> dict:
     try:
-        package = read_package(data)
+        info = pdf_standard.inspect(data)
+    except NotAPackage:
+        result["status"] = STATUS_UNSIGNED
+        result["reason"] = REASON_UNSIGNED
+        return result
+    except PackageError:
+        return result
+
+    result["algorithm"] = info["algorithm"]
+    result["key_size"] = info["key_size"]
+    result["sha256"] = hashlib.sha256(data).hexdigest()
+    result["hash_match"] = info["intact"]
+    result["signature_valid"] = info["valid"]
+    result["key_fingerprint"] = key_fingerprint(info["public_key"])
+
+    if lookup_key is not None:
+        record = lookup_key(result["key_fingerprint"])
+        result["key_registered"] = record is not None
+        result["key_id"] = record["id"] if record else None
+
+    unchanged = info["entire_file"] and info["unmodified"] and info["clean_contents"]
+    if info["intact"] and info["valid"] and unchanged and info["certificate_intact"]:
+        result["status"] = STATUS_VALID
+        result["reason"] = REASON_OK
+    elif not info["valid"] and info["intact"]:
+        result["reason"] = REASON_SIGNATURE
+    elif info["intact"] and info["valid"] and unchanged:
+        result["reason"] = REASON_CERTIFICATE
+    else:
+        result["reason"] = REASON_MODIFIED
+    return result
+
+
+def verify_package(
+    data: bytes, lookup_key: Optional[Callable[[str], Optional[dict]]] = None
+) -> dict:
+    result = _blank_result()
+    if not has_signature(data) and pdf_standard.is_signed_pdf(data):
+        return _verify_standard_pdf(data, lookup_key, result)
+    try:
+        package = read_signed(data)
     except NotAPackage:
         result["status"] = STATUS_UNSIGNED
         result["reason"] = REASON_UNSIGNED
@@ -130,7 +173,7 @@ def verify_package(
 
     manifest = package["manifest"]
     document = package["document"]
-    result["document_name"] = manifest["document_name"]
+    result["document_name"] = manifest.get("document_name")
     result["algorithm"] = manifest["algorithm"]
     result["key_size"] = manifest["key_size"]
     result["sha256"] = hashlib.sha256(document).hexdigest()
@@ -156,14 +199,21 @@ def verify_package(
 
 
 def expand_uploads(name: str, data: bytes) -> List[Tuple[str, bytes]]:
+    if is_signed(data):
+        return [(name, data)]
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile:
         return [(name, data)]
-    names = archive.namelist()
-    if MANIFEST_NAME in names:
+    members = [n for n in archive.namelist() if not n.endswith("/")]
+    if not any(is_signed(archive.read(n)) for n in members):
         return [(name, data)]
-    inner = [n for n in names if n.endswith(PACKAGE_SUFFIX)]
-    if not inner:
-        return [(name, data)]
-    return [(n, archive.read(n)) for n in inner]
+    return [(n, archive.read(n)) for n in members]
+
+
+def tampered_variants(data: bytes) -> List[bytes]:
+    if has_signature(data):
+        document = read_signed(data)["document"]
+        trailer = data[len(document):]
+        return [tamper(document, mode) + trailer for mode in TAMPER_MODES]
+    return [tamper(data, mode) for mode in TAMPER_MODES]

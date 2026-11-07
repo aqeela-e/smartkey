@@ -5,7 +5,6 @@ import streamlit as st
 
 from config import (
     AI_LABELS,
-    CRYPTO_ALGORITHMS,
     DETECTOR_SAMPLES_SPEC,
     EXPERIMENT_SOURCES,
     EXPERIMENT_TRIALS_SPEC,
@@ -15,7 +14,7 @@ from config import (
     TEXTS,
     UPLOAD_TYPES,
 )
-from modules.evaluation.confusion import confusion_metrics, randomness_detector_confusion
+from modules.evaluation.confusion import randomness_detector_confusion
 from modules.evaluation.document_test import (
     TAMPER_MODES,
     load_folder,
@@ -224,14 +223,19 @@ def render_experiment_panel(config: dict, repository) -> None:
 
     result = st.session_state.get("experiment")
     if result:
+        info = repository.result_info(st.session_state["experiment_id"])
         st.caption(
             "%s | %s"
-            % (AI_LABELS[result["config"]["ai"]], TEXTS["experiment_saved"] % st.session_state["experiment_id"])
+            % (
+                AI_LABELS[result["config"]["ai"]],
+                TEXTS["experiment_saved"] % (info["id"], info["created_at"]),
+            )
         )
     else:
-        result = repository.latest_result("experiment")
-        if result:
-            st.caption(TEXTS["experiment_loaded_db"])
+        latest = repository.latest("experiment")
+        result = latest["payload"] if latest else None
+        if latest:
+            st.caption(TEXTS["experiment_loaded_db"] % (latest["id"], latest["created_at"]))
     if result:
         packages = st.session_state.get("experiment_packages")
         if packages and os.path.exists(packages["path"]):
@@ -256,9 +260,17 @@ def render_experiment_panel(config: dict, repository) -> None:
         detector = randomness_detector_confusion(int(samples), config["bit_length"])
         detector["kind"] = "detector"
         st.session_state["detector"] = detector
-        repository.save_result(
+        st.session_state["detector_id"] = repository.save_result(
             "detector", detector, "%d seed per kelas | %d bit" % (int(samples), config["bit_length"])
         )
-    detector_result = st.session_state.get("detector") or repository.latest_result("detector")
+    detector_result = st.session_state.get("detector")
+    if detector_result:
+        info = repository.result_info(st.session_state["detector_id"])
+        st.caption(TEXTS["experiment_saved"] % (info["id"], info["created_at"]))
+    else:
+        latest = repository.latest("detector")
+        detector_result = latest["payload"] if latest else None
+        if latest:
+            st.caption(TEXTS["experiment_loaded_db"] % (latest["id"], latest["created_at"]))
     if detector_result:
         render_detector_result(detector_result)

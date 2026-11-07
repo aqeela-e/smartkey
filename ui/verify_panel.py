@@ -3,17 +3,14 @@ import streamlit as st
 
 from config import REASON_LABELS, STATUS_LABELS, TEXTS
 from modules.evaluation.confusion import add_outcome, confusion_metrics, empty_counts
-from modules.evaluation.document_test import TAMPER_MODES, tamper
 from modules.signing import (
     STATUS_INVALID,
     STATUS_UNSIGNED,
     STATUS_VALID,
-    check_signature,
     expand_uploads,
-    read_package,
+    tampered_variants,
     verify_package,
 )
-from modules.signing.package import PackageError
 from ui.charts import confusion_heatmap, ring_chart, show
 
 
@@ -49,16 +46,11 @@ def _verify_uploads(uploads, repository) -> list:
 def _tamper_counts(uploads) -> dict:
     counts = empty_counts()
     for _, data in _expanded(uploads):
-        try:
-            package = read_package(data)
-        except PackageError:
+        if verify_package(data)["status"] != STATUS_VALID:
             continue
-        document = package["document"]
-        if not check_signature(package, document):
-            continue
-        add_outcome(counts, True, check_signature(package, document))
-        for mode in TAMPER_MODES:
-            add_outcome(counts, False, check_signature(package, tamper(document, mode)))
+        add_outcome(counts, True, True)
+        for variant in tampered_variants(data):
+            add_outcome(counts, False, verify_package(variant)["status"] == STATUS_VALID)
     return counts
 
 

@@ -1,6 +1,4 @@
-import csv
 import hashlib
-import io
 import os
 import time
 import zipfile
@@ -10,10 +8,8 @@ from modules.crypto.key_generator import CryptoKeyGenerator
 from modules.evaluation.document_test import format_of
 from modules.evaluation.metrics import Evaluator
 from modules.experiment.runner import build_ai
-from modules.signing.package import PACKAGE_SUFFIX, build_package, safe_name
-
-INDEX_NAME = "index.csv"
-INDEX_COLUMNS = ("name", "format", "size_bytes", "sha256", "signature_hex")
+from modules.signing import pdf_standard
+from modules.signing.package import build_signed_file, safe_name, verify_package
 
 
 def unique_names(names: Sequence[str]) -> List[str]:
@@ -29,15 +25,6 @@ def unique_names(names: Sequence[str]) -> List[str]:
             stem, dot, extension = name.rpartition(".")
             result.append("%s_%d.%s" % (stem, count, extension) if dot else "%s_%d" % (name, count))
     return result
-
-
-def _index_csv(rows: List[dict]) -> str:
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(INDEX_COLUMNS)
-    for row in rows:
-        writer.writerow([row[column] for column in INDEX_COLUMNS])
-    return buffer.getvalue()
 
 
 def sign_documents(
@@ -72,25 +59,44 @@ def sign_documents(
     single = len(documents) == 1
     path = os.path.join(
         packages_dir,
-        ("%d_%s%s" % (stamp, names[0], PACKAGE_SUFFIX)) if single else "batch_%d.zip" % stamp,
+        ("%d_%s" % (stamp, names[0])) if single else "batch_%d.zip" % stamp,
     )
+
+    standard_signer = None
+    if crypto_gen.algorithm == "RSA" and pdf_standard.AVAILABLE:
+        standard_signer = pdf_standard.create_signer(private_key)
 
     rows: List[dict] = []
     sign_times: List[float] = []
+    standard_count = 0
+    pdf_count = 0
+    first_signed = b""
     outer = None if single else zipfile.ZipFile(path, "w", zipfile.ZIP_STORED)
     try:
         for index, ((_, data), name) in enumerate(zip(documents, names)):
             begin = time.perf_counter()
-            signature = crypto_gen.sign(private_key, data)
+            signed = None
+            if pdf_standard.is_pdf(data):
+                pdf_count += 1
+                if standard_signer is not None:
+                    try:
+                        signed, signature = pdf_standard.sign(standard_signer, data)
+                        standard_count += 1
+                    except Exception:
+                        signed = None
+            if signed is None:
+                signature = crypto_gen.sign(private_key, data)
+                signed = build_signed_file(
+                    data, signature, crypto_gen.algorithm, key_size, export, ai_name
+                )
             sign_times.append((time.perf_counter() - begin) * 1000)
-            package = build_package(
-                name, data, signature, crypto_gen.algorithm, key_size, export, ai_name
-            )
+            if index == 0:
+                first_signed = signed
             if single:
                 with open(path, "wb") as handle:
-                    handle.write(package)
+                    handle.write(signed)
             else:
-                outer.writestr(name + PACKAGE_SUFFIX, package)
+                outer.writestr(name, signed)
             rows.append(
                 {
                     "name": name,
@@ -102,16 +108,12 @@ def sign_documents(
             )
             if progress and ((index + 1) % 25 == 0 or index + 1 == len(documents)):
                 progress((index + 1) / len(documents))
-        if outer is not None:
-            outer.writestr(INDEX_NAME, _index_csv(rows))
     finally:
         if outer is not None:
             outer.close()
 
-    first_document = documents[0][1]
-    first_signature = bytes.fromhex(rows[0]["signature_hex"])
     begin = time.perf_counter()
-    crypto_gen.verify(public_key, first_document, first_signature)
+    verify_package(first_signed)
     verify_ms = (time.perf_counter() - begin) * 1000
 
     batch_id = repository.add_batch(
@@ -142,6 +144,8 @@ def sign_documents(
         "sign_ms": sum(sign_times) / len(sign_times),
         "verify_ms": verify_ms,
         "public_key_export": export,
+        "pdf_count": pdf_count,
+        "standard_pdf_count": standard_count,
     }
 
 
@@ -169,8 +173,7 @@ def package_experiment(
             names = unique_names([name for name, _, _ in items])
             rows = []
             for (_, data, signature), name in zip(items, names):
-                package = build_package(
-                    name,
+                signed = build_signed_file(
                     data,
                     signature,
                     algorithm,
@@ -178,7 +181,7 @@ def package_experiment(
                     info["public_key"],
                     result["config"]["ai"],
                 )
-                outer.writestr("%s/%s%s" % (algorithm, name, PACKAGE_SUFFIX), package)
+                outer.writestr("%s/%s" % (algorithm, name), signed)
                 rows.append(
                     {
                         "name": name,

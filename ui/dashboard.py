@@ -27,15 +27,13 @@ def render_dashboard() -> None:
 
     evaluation = state["evaluation"]
 
-    row = st.columns(4)
+    row = st.columns(2)
     row[0].metric(TEXTS["metric_time"], "%.2f ms" % evaluation.get("time_ms", 0.0))
     row[1].metric(
         TEXTS["metric_entropy"],
         "%.3f / %.3f" % (evaluation["entropy_shannon"], evaluation["entropy_max_bits"]),
         help=TEXTS["metric_entropy_help"],
     )
-    row[2].metric(TEXTS["metric_normalized"], "%.3f" % evaluation["normalized_entropy"])
-    row[3].metric(TEXTS["metric_nist"], "%.1f%%" % (evaluation["nist_pass_rate"] * 100))
 
     timing = st.columns(3)
     timing[0].metric(TEXTS["metric_keygen"], "%.2f ms" % state["keygen_ms"])

@@ -1,7 +1,7 @@
 import os
 
 from modules.crypto import DSAHandler, ElGamalHandler, RSAHandler
-from modules.evaluation.document_test import DOCUMENT_FORMATS, TAMPER_MODES
+from modules.evaluation.document_test import DOCUMENT_FORMATS
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -94,7 +94,7 @@ TEXTS = {
     "tab_history": "Riwayat",
     "sidebar_crypto_choice": "Algoritma untuk Sign",
     "sign_header": "Sign Dokumen",
-    "sign_intro": "Satu seed AI dipakai untuk membuat kunci, lalu setiap dokumen ditandatangani dan dikemas menjadi file bertanda tangan. Banyak dokumen langsung diunduh sebagai satu ZIP.",
+    "sign_intro": "Satu seed AI dipakai untuk membuat kunci, lalu setiap dokumen ditandatangani. Satu dokumen diunduh sebagai file bertanda tangan dengan format aslinya. Lebih dari satu dokumen diunduh otomatis sebagai satu ZIP.",
     "sign_source": "Sumber dokumen",
     "sign_upload": "Unggah satu atau banyak dokumen",
     "sign_text": "Tulis teks yang akan ditandatangani",
@@ -104,11 +104,13 @@ TEXTS = {
     "sign_button": "Sign dokumen",
     "sign_running": "Membangkitkan seed dan menandatangani",
     "sign_done": "%d dokumen ditandatangani dengan %s %d bit.",
-    "sign_download_single": "Unduh dokumen bertanda tangan",
-    "sign_download_batch": "Unduh semua dokumen bertanda tangan (satu ZIP)",
+    "sign_download_single": "Unduh file bertanda tangan",
+    "sign_download_batch": "Unduh semua file bertanda tangan (ZIP)",
     "sign_saved": "Tersimpan otomatis di %s",
     "sign_key_info": "Kunci publik terdaftar di database dengan ID %d. Batch ID %d.",
     "sign_records": "Dokumen yang ditandatangani",
+    "sign_standard_pdf": "%d PDF memakai tanda tangan PDF standar sehingga terbaca di Nitro dan Adobe. Sertifikatnya dibuat sendiri, jadi statusnya tampil sebagai belum tepercaya.",
+    "sign_standard_note": "Tanda tangan PDF standar hanya tersedia untuk PDF dengan RSA. Untuk DSA, ElGamal, dan format lain, tanda tangan SmartKey tertanam di file dan diverifikasi di tab Verifikasi.",
     "sign_next": "Untuk memeriksa keaslian, unggah berkas ini di tab Verifikasi.",
     "sign_col_name": "Berkas",
     "sign_col_format": "Format",
@@ -116,7 +118,7 @@ TEXTS = {
     "sign_col_sha": "SHA-256",
     "sign_col_signature": "Signature (awal)",
     "verify_header": "Verifikasi Dokumen",
-    "verify_intro": "Unggah dokumen bertanda tangan (.signed.zip) atau ZIP hasil batch. Berkas biasa yang belum ditandatangani akan dinyatakan belum bertanda tangan.",
+    "verify_intro": "Unggah file bertanda tangan atau ZIP hasil batch. Berkas biasa yang belum ditandatangani akan dinyatakan belum bertanda tangan.",
     "verify_upload": "Unggah berkas untuk diverifikasi",
     "verify_button": "Verifikasi",
     "verify_none": "Belum ada berkas yang diunggah.",
@@ -142,15 +144,15 @@ TEXTS = {
     "history_json": "Unduh JSON",
     "history_none": "Belum ada data tersimpan.",
     "history_pick_batch": "Pilih batch tanda tangan",
-    "history_download_pkg": "Unduh paket batch",
+    "history_download_pkg": "Unduh hasil batch",
     "history_missing": "Berkas paket tidak ditemukan di disk.",
     "history_docs": "Dokumen dalam batch",
     "history_sensitive": "Database memuat seed dan kunci publik. Perlakukan folder data sebagai data sensitif.",
-    "experiment_saved": "Hasil tersimpan di database dengan ID %d",
-    "experiment_loaded_db": "Menampilkan hasil terakhir dari database",
-    "experiment_make_packages": "Buat paket tanda tangan untuk semua dokumen (percobaan pertama)",
-    "experiment_packages_ready": "%d paket tanda tangan siap diunduh dalam satu ZIP",
-    "experiment_download_packages": "Unduh semua paket tanda tangan (ZIP)",
+    "experiment_saved": "Hasil tersimpan di database dengan ID %d pada %s",
+    "experiment_loaded_db": "Menampilkan hasil terakhir dari database (ID %d, dibuat %s)",
+    "experiment_make_packages": "Buat file bertanda tangan untuk semua dokumen (percobaan pertama)",
+    "experiment_packages_ready": "%d file bertanda tangan siap diunduh dalam satu ZIP",
+    "experiment_download_packages": "Unduh semua file bertanda tangan (ZIP)",
     "subtitle": "Analisis pembangkitan seed berbasis AI untuk tanda tangan digital RSA, DSA, dan ElGamal.",
     "tab_experiment": "Eksperimen Multi Dokumen",
     "tab_benchmark": "Benchmark AI",
@@ -205,8 +207,6 @@ TEXTS = {
     "metric_time": "Waktu generate AI",
     "metric_entropy": "Entropi Shannon",
     "metric_entropy_help": "Entropi frekuensi byte. Batas teoritis untuk n byte adalah log2(min(256, n)).",
-    "metric_normalized": "Entropi ternormalisasi",
-    "metric_nist": "NIST pass rate",
     "metric_keygen": "Waktu keygen",
     "metric_sign": "Waktu sign",
     "metric_verify": "Waktu verify",
@@ -248,4 +248,5 @@ REASON_LABELS = {
     "document_modified": "Dokumen telah diubah setelah ditandatangani",
     "signature_invalid": "Tanda tangan tidak cocok dengan dokumen",
     "manifest_mismatch": "Data manifest tidak cocok dengan dokumen",
+    "certificate_invalid": "Sertifikat penanda tangan tidak dapat diverifikasi sebagai sertifikat SmartKey",
 }
